@@ -654,11 +654,11 @@ CudaRenderer::advanceAnimation() {
 void
 CudaRenderer::render() {
     // naive solution: decide color for each circles
-    static const THREAD_PER_BLOCK = 64;
+    static const int THREAD_PER_BLOCK = 64;
     short imageWidth = image->width, imageHeight = image->height;
     float invWidth = 1.f / imageWidth, invHeight = 1.f / imageHeight;
     for (int i = 0; i < numCircles; i++) {
-        float px = position[i * 3], py = position[i * 3 +1], rad = radius[i];
+        float px = position[i * 3], py = position[i * 3 + 1], rad = radius[i];
         short minX = static_cast<short>(imageWidth * (px - rad));
         short maxX = static_cast<short>(imageWidth * (px + rad)) + 1;
         short minY = static_cast<short>(imageHeight * (py - rad));

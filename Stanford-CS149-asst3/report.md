@@ -10,6 +10,8 @@
 [saxpy task ispc]:	[5.049] ms	[59.029] GB/s	[7.923] GFLOPS
 (V100) Effective BW by CUDA saxpy: 345.795 ms          [3.232 GB/s]
 Kernel BW by CUDA saxpy: 1.529 ms               [730.976 GB/s]
+(T4) Effective BW by CUDA saxpy: 267.100 ms		[4.184 GB/s]
+Kernel BW by CUDA saxpy: 4.792 ms		[233.207 GB/s]
 
 ### Question 2. Compare and explain the difference between the results provided by two sets of timers (timing only the kernel execution vs. timing the entire process of moving data to the GPU and back in addition to the kernel execution). Are the bandwidth values observed roughly consistent with the reported bandwidths available to the different components of the machine? (You should use the web to track down the memory bandwidth of an NVIDIA T4 GPU. Hint: https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/tesla-t4/t4-tensor-core-datasheet-951643.pdf. The expected bandwidth of memory bus of AWS is 4 GB/s, which does not match that of a 16-lane PCIe 3.0. Several factors prevent peak bandwidth, including CPU motherboard chipset performance and whether or not the host CPU memory used as the source of the transfer is “pinned” — the latter allows the GPU to directly access memory without going through virtual memory address translation. If you are interested, you can find more info here: https://kth.instructure.com/courses/12406/pages/optimizing-host-device-data-communication-i-pinned-host-memory)
 

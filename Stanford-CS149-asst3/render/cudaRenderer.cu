@@ -427,6 +427,24 @@ __global__ void kernelRenderCircles() {
     }
 }
 
+__global__ void kernelRenderOneCircle(short imageWidth, short imageHeight, float invWidth, float invHeight, 
+    short screenMinX, short screenMaxX, short screenMinY, short screenMaxY, int circleIndex) {
+
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int totalPixelsNeeded = (screenMaxX - screenMinX) * (screenMaxY - screenMinY);
+    if (index >= totalPixelsNeeded)
+        return;
+
+    int xDim = screenMaxX - screenMinX;
+    int pixelX = index % xDim + screenMinX;
+    int pixelY = index / xDim + screenMinY;
+    float3 p = *(float3*)(&cuConstRendererParams.position[circleIndex * 3]);
+    float4* imgPtr = (float4*)(&cuConstRendererParams.imageData[4 * (pixelY * imageWidth + pixelX)]);
+    float2 pixelCenterNorm = make_float2(invWidth * (static_cast<float>(pixelX) + 0.5f),
+                                         invHeight * (static_cast<float>(pixelY) + 0.5f));
+    shadePixel(index, pixelCenterNorm, p, imgPtr);
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////
 
 
@@ -635,11 +653,28 @@ CudaRenderer::advanceAnimation() {
 
 void
 CudaRenderer::render() {
+    // naive solution: decide color for each circles
+    static const THREAD_PER_BLOCK = 64;
+    short imageWidth = image->width, imageHeight = image->height;
+    float invWidth = 1.f / imageWidth, invHeight = 1.f / imageHeight;
+    for (int i = 0; i < numCircles; i++) {
+        float px = position[i * 3], py = position[i * 3 +1], rad = radius[i];
+        short minX = static_cast<short>(imageWidth * (px - rad));
+        short maxX = static_cast<short>(imageWidth * (px + rad)) + 1;
+        short minY = static_cast<short>(imageHeight * (py - rad));
+        short maxY = static_cast<short>(imageHeight * (py + rad)) + 1;
+        short screenMinX = (minX > 0) ? ((minX < imageWidth) ? minX : imageWidth) : 0;
+        short screenMaxX = (maxX > 0) ? ((maxX < imageWidth) ? maxX : imageWidth) : 0;
+        short screenMinY = (minY > 0) ? ((minY < imageHeight) ? minY : imageHeight) : 0;
+        short screenMaxY = (maxY > 0) ? ((maxY < imageHeight) ? maxY : imageHeight) : 0;
 
-    // 256 threads per block is a healthy number
-    dim3 blockDim(256, 1);
-    dim3 gridDim((numCircles + blockDim.x - 1) / blockDim.x);
-
-    kernelRenderCircles<<<gridDim, blockDim>>>();
-    cudaDeviceSynchronize();
+        int totalPixelsNeeded = (screenMaxX - screenMinX) * (screenMaxY - screenMinY);
+        int num_threads = totalPixelsNeeded > THREAD_PER_BLOCK ? THREAD_PER_BLOCK : totalPixelsNeeded;
+        int num_blocks = (totalPixelsNeeded + num_threads - 1) / num_threads;
+        kernelRenderOneCircle<<<num_blocks, num_threads>>>(
+            imageWidth, imageHeight, invWidth, invHeight,
+            screenMinX, screenMaxX, screenMinY, screenMaxY, i
+        );
+        cudaDeviceSynchronize();
+    }
 }

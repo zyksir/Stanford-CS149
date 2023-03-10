@@ -17,3 +17,5 @@ prog*/*.log
 *prog6_kmeans/start.png
 *prog6_kmeans/end.png
 *prog6_kmeans/*.log
+helper.py
+asst3_ref*/

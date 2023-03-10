@@ -27,6 +27,38 @@ static inline int nextPow2(int n) {
     return n;
 }
 
+__global__ void copy_and_upsweep(int* input, int *result, int length) {
+    int thread_id = threadIdx.x + blockDim.x * blockIdx.x;
+    int ai = thread_id * 2;
+    int bi = thread_id * 2 + 1;
+    if (ai < length) {
+        result[ai] = input[ai];
+    }
+    if (bi < length) {
+        result[bi] = input[ai] + input[bi];
+    }
+}
+
+__global__ void upsweep_phase(int *result, int two_d) {
+    int thread_id = threadIdx.x + blockDim.x * blockIdx.x;
+    int ai = two_d * ((thread_id << 1) + 1) - 1;
+    int bi = two_d * ((thread_id << 1) + 2) - 1;
+    result[bi] += result[ai];
+}
+
+__global__ void clear_last(int* result, int N) {
+    result[N-1] = 0;
+}
+
+__global__ void downsweep_phase(int* result, int two_d) {
+    int thread_id = threadIdx.x + blockDim.x * blockIdx.x;
+    int ai = two_d * ((thread_id << 1) + 1) - 1;
+    int bi = two_d * ((thread_id << 1) + 2) - 1;
+    int t = result[ai];
+    result[ai] = result[bi];
+    result[bi] += t;
+}
+
 // exclusive_scan --
 //
 // Implementation of an exclusive scan on global memory array `input`,
@@ -53,8 +85,42 @@ void exclusive_scan(int* input, int N, int* result)
     // on the CPU.  Your implementation will need to make multiple calls
     // to CUDA kernel functions (that you must write) to implement the
     // scan.
+    int rounded_length = nextPow2(N);
 
+    int totalThreadSize = rounded_length / 2; // change to (N+1) / 2 can improve latency slightly
+    int threadSize = totalThreadSize > THREADS_PER_BLOCK ? THREADS_PER_BLOCK : totalThreadSize;
+    int gridSize = totalThreadSize / threadSize;
+    copy_and_upsweep<<<gridSize, threadSize>>>(input, result, rounded_length); // change totalThreadSize to N
+    cudaDeviceSynchronize();
 
+    for (int two_d = 2; two_d <= rounded_length/2; two_d*=2) {
+        int two_dplus1 = 2*two_d;
+        int totalThreadSize = rounded_length / two_dplus1;
+        int threadSize = totalThreadSize > THREADS_PER_BLOCK ? THREADS_PER_BLOCK : totalThreadSize;
+        int gridSize = totalThreadSize / threadSize;
+        upsweep_phase<<<gridSize, threadSize>>>(result, two_d);
+        cudaDeviceSynchronize();
+        // parallel_for (int i = 0; i < N; i += two_dplus1) {
+        //     output[i+two_dplus1-1] += output[i+two_d-1];
+        // }
+    }
+
+    clear_last<<<1, 1>>>(result, rounded_length); // output[N-1] = 0;
+
+    // downsweep phase
+    for (int two_d = rounded_length/2; two_d >= 1; two_d /= 2) {
+        int two_dplus1 = 2*two_d;
+        int totalThreadSize = rounded_length / two_dplus1;
+        int threadSize = totalThreadSize > THREADS_PER_BLOCK ? THREADS_PER_BLOCK : totalThreadSize;
+        int gridSize = totalThreadSize / threadSize;
+        downsweep_phase<<<gridSize, threadSize>>>(result, two_d);
+        cudaDeviceSynchronize();
+        // parallel_for (int i = 0; i < N; i += two_dplus1) {
+        //     int t = output[i+two_d-1];
+        //     output[i+two_d-1] = output[i+two_dplus1-1];
+        //     output[i+two_dplus1-1] += t;
+        // }
+    }
 }
 
 
@@ -140,6 +206,19 @@ double cudaScanThrust(int* inarray, int* end, int* resultarray) {
     return overallDuration; 
 }
 
+__global__ void consecutive_cmp(int* input, int* output, int length) {
+    int thread_id = threadIdx.x + blockDim.x * blockIdx.x;
+    if (thread_id + 1 < length) {
+        output[thread_id] = input[thread_id] == input[thread_id+1] ? 1 : 0;
+    }
+}
+
+__global__ void set_result(int* input, int* output, int length) {
+    int thread_id = threadIdx.x + blockDim.x * blockIdx.x;
+    if (thread_id + 1 < length && input[thread_id] != input[thread_id+1]) {
+        output[input[thread_id]] = thread_id;
+    }
+}
 
 // find_repeats --
 //
@@ -160,8 +239,21 @@ int find_repeats(int* device_input, int length, int* device_output) {
     // exclusive_scan function with them. However, your implementation
     // must ensure that the results of find_repeats are correct given
     // the actual array length.
+    int num_repeats = 0;
 
-    return 0; 
+    int threadSize = length > THREADS_PER_BLOCK ? THREADS_PER_BLOCK : length;
+    int num_blocks = (length + threadSize - 1) / threadSize;
+    consecutive_cmp<<<num_blocks, threadSize>>>(device_input, device_output, length);
+    cudaDeviceSynchronize();
+
+    exclusive_scan(device_output, length, device_input);
+    cudaDeviceSynchronize();
+    cudaMemcpy(&num_repeats, device_input + length - 1, sizeof(int), cudaMemcpyDeviceToHost);
+
+    set_result<<<num_blocks, threadSize>>>(device_input, device_output, length);
+    cudaDeviceSynchronize();
+
+    return num_repeats; 
 }
 
 

@@ -477,7 +477,7 @@ checkCandidateCirclesOnce(float boxL, float boxR, float boxB, float boxT,
         float rad = cuConstRendererParams.radius[circleIdx];
 
         if (circleInBoxConservative(p.x, p.y, rad, boxL, boxR, boxT, boxB)) {
-            circleInBoxOutput[tIdx] = static_cast<uint> (circleInBox(p.x, p.y, rad, boxL, boxR, boxT, boxB));
+            output[tIdx] = static_cast<uint> (circleInBox(p.x, p.y, rad, boxL, boxR, boxT, boxB));
         } else {
             output[tIdx] = 0;
         }
@@ -543,7 +543,7 @@ __global__ void kernelRenderCircles() {
     // __shared__ uint candidateConservativeCircles[BLOCKSIZE];
     // __shared__ uint candidateCircles[BLOCKSIZE];
     __shared__ uint scratch[BLOCKSIZE*2];
-    uint numConservativeCircles;
+    // uint numConservativeCircles;
     uint numCandidateCircles;
     size_t circleIdx;
     float4* imgPtr;

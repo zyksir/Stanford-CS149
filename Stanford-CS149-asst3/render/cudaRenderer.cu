@@ -442,7 +442,7 @@ __global__ void kernelRenderOneCircle(short imageWidth, short imageHeight, float
     float4* imgPtr = (float4*)(&cuConstRendererParams.imageData[4 * (pixelY * imageWidth + pixelX)]);
     float2 pixelCenterNorm = make_float2(invWidth * (static_cast<float>(pixelX) + 0.5f),
                                          invHeight * (static_cast<float>(pixelY) + 0.5f));
-    shadePixel(index, pixelCenterNorm, p, imgPtr);
+    shadePixel(circleIndex, pixelCenterNorm, p, imgPtr);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////

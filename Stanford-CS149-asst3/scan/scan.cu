@@ -86,9 +86,8 @@ void exclusive_scan(int* input, int N, int* result)
     int rounded_length = nextPow2(N);
 
     int totalThreadSize = (N+1) / 2; 
-    int threadSize = totalThreadSize > THREADS_PER_BLOCK ? THREADS_PER_BLOCK : totalThreadSize;
-    int gridSize = totalThreadSize / threadSize;
-    copy_and_upsweep<<<gridSize, threadSize>>>(input, result, N); // change totalThreadSize to N
+    int gridSize = (totalThreadSize + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+    copy_and_upsweep<<<gridSize, THREADS_PER_BLOCK>>>(input, result, N); // change totalThreadSize to N
     cudaDeviceSynchronize();
 
     for (int two_d = 2; two_d <= rounded_length/2; two_d*=2) {

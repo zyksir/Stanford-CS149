@@ -14,6 +14,10 @@
 #include "sceneLoader.h"
 #include "util.h"
 
+#define BLOCKDIM 32
+#define BLOCKSIZE (BLOCKDIM * BLOCKDIM)
+#define SCAN_BLOCK_DIM BLOCKSIZE
+
 ////////////////////////////////////////////////////////////////////////////////////////
 // Putting all the cuda kernels here
 ///////////////////////////////////////////////////////////////////////////////////////
@@ -384,7 +388,7 @@ shadePixel(int circleIndex, float2 pixelCenter, float3 p, float4* imagePtr) {
 // Each thread renders a circle.  Since there is no protection to
 // ensure order of update or mutual exclusion on the output image, the
 // resulting image will be incorrect.
-__global__ void kernelRenderCircles() {
+__global__ void errorKernelRenderCircles() {
 
     int index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -443,6 +447,112 @@ __global__ void kernelRenderOneCircle(short imageWidth, short imageHeight, float
     float2 pixelCenterNorm = make_float2(invWidth * (static_cast<float>(pixelX) + 0.5f),
                                          invHeight * (static_cast<float>(pixelY) + 0.5f));
     shadePixel(circleIndex, pixelCenterNorm, p, imgPtr);
+}
+
+// check whether a circle has intersection with this box using a Rough Filter.
+__inline__ __device__ void
+checkConservativeCircles(float boxL, float boxR, float boxB, float boxT, 
+    size_t circleIdx, size_t tIdx, size_t numCircles, uint* circleInBoxConservativeOutput) {
+    if (circleIdx >= numCircles) {
+        circleInBoxConservativeOutput[tIdx] = 0;
+    } else {
+        float3 p = *(float3*)(&cuConstRendererParams.position[circleIdx * 3]);
+        float rad = cuConstRendererParams.radius[circleIdx];
+
+        circleInBoxConservativeOutput[tIdx] = static_cast<uint> (circleInBoxConservative(p.x, p.y, rad, boxL, boxR, boxT, boxB));
+    }
+}
+
+__inline__ __device__ void
+findCandidateCircles(size_t tIdx, size_t circleIdx, uint* inclusiveScanOutput, uint* candidateCircles, size_t length) {
+    if (tIdx >= length) return;
+    if (tIdx == 0) {
+        if (inclusiveScanOutput[0] == 1) {
+            candidateCircles[0] = circleIdx;
+        }
+    } else if (inclusiveScanOutput[tIdx] == inclusiveScanOutput[tIdx-1] + 1) {
+        candidateCircles[inclusiveScanOutput[tIdx-1]] = circleIdx;
+    }
+}
+
+__inline__ __device__ void
+checkCircleInBox(float boxL, float boxR, float boxB, float boxT, 
+    size_t circleIdx, size_t tIdx, uint* circleInBoxOutput) {
+    float3 p = *(float3*)(&cuConstRendererParams.position[circleIdx * 3]);
+    float rad = cuConstRendererParams.radius[circleIdx];
+
+    circleInBoxOutput[tIdx] = static_cast<uint> (circleInBox(p.x, p.y, rad, boxL, boxR, boxT, boxB));
+}
+
+__global__ void kernelRenderCircles() {
+    short imageWidth = cuConstRendererParams.imageWidth;
+    short imageHeight = cuConstRendererParams.imageHeight;
+    const size_t numCirclesPerIteration = BLOCKSIZE;
+    const size_t numCircles = cuConstRendererParams.numCircles;
+
+    int pixelX = blockIdx.x * blockDim.x + threadIdx.x;
+    int pixelY = blockIdx.y * blockDim.y + threadIdx.y;
+    int tIdx = blockDim.x * threadIdx.y + threadIdx.x;
+
+    // Left, Right, Bottom, Top for the current block
+    float boxL = static_cast<float>(blockIdx.x) / gridDim.x; 
+    float boxR = boxL + static_cast<float>(blockDim.x) / gridDim.x; 
+    float boxB = static_cast<float>(blockIdx.y) / gridDim.y; 
+    float boxT = boxB + static_cast<float>(blockDim.y) / gridDim.y;
+
+    __shared__ uint circleInBoxOutput[BLOCKSIZE];
+    // __shared__ uint circleInBoxConservativeOutput[BLOCKSIZE];
+    __shared__ uint inclusiveScanOutput[BLOCKSIZE];
+    __shared__ uint candidateConservativeCircles[BLOCKSIZE];
+    // __shared__ uint candidateCircles[BLOCKSIZE];
+    __shared__ uint scratch[BLOCKSIZE*2];
+    uint numConservativeCircles;
+    uint numCandidateCircles;
+    int circleIdx;
+    float4* imgPtr;
+    float2 pixelCenterNorm;
+
+    if (pixelX < imageWidth && pixelY < imageHeight) {
+        imgPtr = (float4*)(&cuConstRendererParams.imageData[4 * (pixelY * imageWidth + pixelX)]);
+        pixelCenterNorm = make_float2(invWidth * (static_cast<float>(pixelX) + 0.5f),
+                                                    invHeight * (static_cast<float>(pixelY) + 0.5f));
+    }
+
+
+    // each time, we can check whether numCirclesPerIteration circles concurrently
+    for(size_t circleIdxStart = 0; circleIdxStart < numCircles; circleIdxStart += numCirclesPerIteration) {
+        circleIdx = tIdx + circleIdxStart;
+
+        uint* circleInBoxConservativeOutput = circleInBoxOutput;
+        checkConservativeCircles(boxL, boxR, boxB, boxT, circleIdx, tIdx, numCircles, circleInBoxConservativeOutput);
+        __syncthreads();
+        sharedMemExclusiveScan(tIdx, circleInBoxConservativeOutput, inclusiveScanOutput, scratch, BLOCKSIZE);
+        __syncthreads();
+        findCandidateCircles(tIdx, circleIdx, inclusiveScanOutput, candidateConservativeCircles, BLOCKSIZE);
+        numConservativeCircles = inclusiveScanOutput[BLOCKSIZE - 1];
+        __syncthreads();
+
+        if (tIdx >= numConservativeCircles) {
+            circleInBoxOutput[i] = 0;
+        } else {
+            checkCircleInBox(boxL, boxR, boxB, boxT, candidateConservativeCircles[tIdx], tIdx, circleInBoxOutput);
+        }
+        __syncthreads();
+        sharedMemExclusiveScan(tIdx, circleInBoxOutput, inclusiveScanOutput, scratch, BLOCKSIZE);
+        __syncthreads();
+        uint* candidateCircles = circleInBoxOutput;
+        findCandidateCircles(tIdx, candidateConservativeCircles[tIdx], inclusiveScanOutput, candidateCircles, numConservativeCircles);
+        numCandidateCircles = inclusiveScanOutput[numConservativeCircles - 1];
+        __syncthreads();
+
+        if (pixelX < imageWidth && pixelY < imageHeight) {
+            for (size_t i=0; i < numCandidateCircles; i++) {
+                circleIdx = candidateCircles[i];
+                float3 p = *(float3*)(&cuConstRendererParams.position[circleIdx * 3]);
+                shadePixel(circleIdx, pixelCenterNorm, p, imgPtr);
+            }
+        }
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -654,6 +764,15 @@ CudaRenderer::advanceAnimation() {
 void
 CudaRenderer::render() {
     // naive solution: decide color for each circles
+    if (numCircles >= 5) {
+        dim3 blockDim(BLOCKDIM, BLOCKDIM);
+        size_t gridDimX = (image->width + blockDim.x - 1) / blockDim.x;
+        size_t gridDimY = (image->height + blockDim.y - 1) / blockDim.y;
+        dim3 gridDim(gridDimX, gridDimY);
+        kernelRenderCircles<<<gridDim, blockDim>>>();
+        cudaDeviceSynchronize();
+        return;
+    }
     static const int THREAD_PER_BLOCK = 64;
     short imageWidth = image->width, imageHeight = image->height;
     float invWidth = 1.f / imageWidth, invHeight = 1.f / imageHeight;

@@ -521,7 +521,7 @@ __global__ void kernelRenderCircles() {
     if (pixelX < imageWidth && pixelY < imageHeight) {
         imgPtr = (float4*)(&cuConstRendererParams.imageData[4 * (pixelY * imageWidth + pixelX)]);
         pixelCenterNorm = make_float2(invWidth * (static_cast<float>(pixelX) + 0.5f),
-                                                    invHeight * (static_cast<float>(pixelY) + 0.5f));
+                                      invHeight * (static_cast<float>(pixelY) + 0.5f));
     }
 
 
@@ -558,6 +558,7 @@ __global__ void kernelRenderCircles() {
                 shadePixel(circleIdx, pixelCenterNorm, p, imgPtr);
             }
         }
+        __syncthreads();
     }
 }
 

@@ -516,10 +516,12 @@ __global__ void kernelRenderCircles() {
     uint numCandidateCircles;
     size_t circleIdx;
     float4* imgPtr;
+    float4 color;
     float2 pixelCenterNorm;
 
     if (pixelX < imageWidth && pixelY < imageHeight) {
         imgPtr = (float4*)(&cuConstRendererParams.imageData[4 * (pixelY * imageWidth + pixelX)]);
+        color = *imgPtr;
         pixelCenterNorm = make_float2(invWidth * (static_cast<float>(pixelX) + 0.5f),
                                       invHeight * (static_cast<float>(pixelY) + 0.5f));
     }
@@ -555,10 +557,14 @@ __global__ void kernelRenderCircles() {
             for (size_t i=0; i < numCandidateCircles; i++) {
                 circleIdx = candidateCircles[i];
                 float3 p = *(float3*)(&cuConstRendererParams.position[circleIdx * 3]);
-                shadePixel(circleIdx, pixelCenterNorm, p, imgPtr);
+                shadePixel(circleIdx, pixelCenterNorm, p, &color);
             }
         }
         __syncthreads();
+    }
+
+    if (pixelX < imageWidth && pixelY < imageHeight) {
+        *imgPtr = color;
     }
 }
 

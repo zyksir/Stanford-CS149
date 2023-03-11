@@ -18,6 +18,9 @@
 #define BLOCKSIZE (BLOCKDIM * BLOCKDIM)
 #define SCAN_BLOCK_DIM BLOCKSIZE
 
+#include "circleBoxTest.cu_inl"
+#include "exclusiveScan.cu_inl"
+
 ////////////////////////////////////////////////////////////////////////////////////////
 // Putting all the cuda kernels here
 ///////////////////////////////////////////////////////////////////////////////////////
@@ -487,6 +490,8 @@ checkCircleInBox(float boxL, float boxR, float boxB, float boxT,
 __global__ void kernelRenderCircles() {
     short imageWidth = cuConstRendererParams.imageWidth;
     short imageHeight = cuConstRendererParams.imageHeight;
+    float invWidth = 1.f / imageWidth;
+    float invHeight = 1.f / imageHeight;
     const size_t numCirclesPerIteration = BLOCKSIZE;
     const size_t numCircles = cuConstRendererParams.numCircles;
 
@@ -533,7 +538,7 @@ __global__ void kernelRenderCircles() {
         __syncthreads();
 
         if (tIdx >= numConservativeCircles) {
-            circleInBoxOutput[i] = 0;
+            circleInBoxOutput[tIdx] = 0;
         } else {
             checkCircleInBox(boxL, boxR, boxB, boxT, candidateConservativeCircles[tIdx], tIdx, circleInBoxOutput);
         }

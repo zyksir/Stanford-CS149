@@ -497,6 +497,7 @@ __global__ void kernelRenderCircles() {
 
     int pixelX = blockIdx.x * blockDim.x + threadIdx.x;
     int pixelY = blockIdx.y * blockDim.y + threadIdx.y;
+    // tIdx: thread_idx in this block, [0, BLOCKSIZE)
     int tIdx = blockDim.x * threadIdx.y + threadIdx.x;
 
     // Left, Right, Bottom, Top for the current block
@@ -513,7 +514,7 @@ __global__ void kernelRenderCircles() {
     __shared__ uint scratch[BLOCKSIZE*2];
     uint numConservativeCircles;
     uint numCandidateCircles;
-    int circleIdx;
+    size_t circleIdx;
     float4* imgPtr;
     float2 pixelCenterNorm;
 
@@ -531,7 +532,7 @@ __global__ void kernelRenderCircles() {
         uint* circleInBoxConservativeOutput = circleInBoxOutput;
         checkConservativeCircles(boxL, boxR, boxB, boxT, circleIdx, tIdx, numCircles, circleInBoxConservativeOutput);
         __syncthreads();
-        sharedMemExclusiveScan(tIdx, circleInBoxConservativeOutput, inclusiveScanOutput, scratch, BLOCKSIZE);
+        sharedMemInclusiveScan(tIdx, circleInBoxConservativeOutput, inclusiveScanOutput, scratch, BLOCKSIZE);
         __syncthreads();
         findCandidateCircles(tIdx, circleIdx, inclusiveScanOutput, candidateConservativeCircles, BLOCKSIZE);
         numConservativeCircles = inclusiveScanOutput[BLOCKSIZE - 1];
@@ -543,7 +544,7 @@ __global__ void kernelRenderCircles() {
             checkCircleInBox(boxL, boxR, boxB, boxT, candidateConservativeCircles[tIdx], tIdx, circleInBoxOutput);
         }
         __syncthreads();
-        sharedMemExclusiveScan(tIdx, circleInBoxOutput, inclusiveScanOutput, scratch, BLOCKSIZE);
+        sharedMemInclusiveScan(tIdx, circleInBoxOutput, inclusiveScanOutput, scratch, BLOCKSIZE);
         __syncthreads();
         uint* candidateCircles = circleInBoxOutput;
         findCandidateCircles(tIdx, candidateConservativeCircles[tIdx], inclusiveScanOutput, candidateCircles, numConservativeCircles);

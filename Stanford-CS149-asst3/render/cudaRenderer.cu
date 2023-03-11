@@ -454,6 +454,20 @@ __global__ void kernelRenderOneCircle(short imageWidth, short imageHeight, float
 
 // check whether a circle has intersection with this box using a Rough Filter.
 __inline__ __device__ void
+checkCandidateCircles(float boxL, float boxR, float boxB, float boxT, 
+    size_t circleIdx, size_t tIdx, size_t numCircles, uint* output,
+    decltype(circleInBox) checkFunc) {
+    if (circleIdx >= numCircles) {
+        output[tIdx] = 0;
+    } else {
+        float3 p = *(float3*)(&cuConstRendererParams.position[circleIdx * 3]);
+        float rad = cuConstRendererParams.radius[circleIdx];
+
+        output[tIdx] = static_cast<uint> (checkFunc(p.x, p.y, rad, boxL, boxR, boxT, boxB));
+    }
+}
+
+__inline__ __device__ void
 checkConservativeCircles(float boxL, float boxR, float boxB, float boxT, 
     size_t circleIdx, size_t tIdx, size_t numCircles, uint* circleInBoxConservativeOutput) {
     if (circleIdx >= numCircles) {
@@ -532,7 +546,8 @@ __global__ void kernelRenderCircles() {
         circleIdx = tIdx + circleIdxStart;
 
         uint* circleInBoxConservativeOutput = circleInBoxOutput;
-        checkConservativeCircles(boxL, boxR, boxB, boxT, circleIdx, tIdx, numCircles, circleInBoxConservativeOutput);
+        checkCandidateCircles(boxL, boxR, boxB, boxT, circleIdx, tIdx, numCircles, circleInBoxConservativeOutput, circleInBoxConservative);
+        // checkConservativeCircles(boxL, boxR, boxB, boxT, circleIdx, tIdx, numCircles, circleInBoxConservativeOutput);
         __syncthreads();
         sharedMemInclusiveScan(tIdx, circleInBoxConservativeOutput, inclusiveScanOutput, scratch, BLOCKSIZE);
         __syncthreads();
@@ -543,7 +558,9 @@ __global__ void kernelRenderCircles() {
         if (tIdx >= numConservativeCircles) {
             circleInBoxOutput[tIdx] = 0;
         } else {
-            checkCircleInBox(boxL, boxR, boxB, boxT, candidateConservativeCircles[tIdx], tIdx, circleInBoxOutput);
+            circleIdx = candidateConservativeCircles[tIdx];
+            checkCandidateCircles(boxL, boxR, boxB, boxT, circleIdx, tIdx, numCircles, circleInBoxOutput, circleInBox);
+            // checkCircleInBox(boxL, boxR, boxB, boxT, candidateConservativeCircles[tIdx], tIdx, circleInBoxOutput);
         }
         __syncthreads();
         sharedMemInclusiveScan(tIdx, circleInBoxOutput, inclusiveScanOutput, scratch, BLOCKSIZE);

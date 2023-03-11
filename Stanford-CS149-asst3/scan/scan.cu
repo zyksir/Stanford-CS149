@@ -30,19 +30,17 @@ static inline int nextPow2(int n) {
 __global__ void copy_and_upsweep(int* input, int *result, int length) {
     int thread_id = threadIdx.x + blockDim.x * blockIdx.x;
     int ai = thread_id * 2;
-    int bi = thread_id * 2 + 1;
-    if (ai < length) {
-        result[ai] = input[ai];
-    }
-    if (bi < length) {
-        result[bi] = input[ai] + input[bi];
-    }
+    int bi = ai + 1;
+    if (ai >= length) return;
+    result[ai] = input[ai];
+    if (bi >= length) return;
+    result[bi] = input[ai] + input[bi];
 }
 
 __global__ void upsweep_phase(int *result, int two_d) {
     int thread_id = threadIdx.x + blockDim.x * blockIdx.x;
     int ai = two_d * ((thread_id << 1) + 1) - 1;
-    int bi = two_d * ((thread_id << 1) + 2) - 1;
+    int bi = ai + two_d;
     result[bi] += result[ai];
 }
 
@@ -53,7 +51,7 @@ __global__ void clear_last(int* result, int N) {
 __global__ void downsweep_phase(int* result, int two_d) {
     int thread_id = threadIdx.x + blockDim.x * blockIdx.x;
     int ai = two_d * ((thread_id << 1) + 1) - 1;
-    int bi = two_d * ((thread_id << 1) + 2) - 1;
+    int bi = ai + two_d;
     int t = result[ai];
     result[ai] = result[bi];
     result[bi] += t;
@@ -87,10 +85,10 @@ void exclusive_scan(int* input, int N, int* result)
     // scan.
     int rounded_length = nextPow2(N);
 
-    int totalThreadSize = rounded_length / 2; // change to (N+1) / 2 can improve latency slightly
+    int totalThreadSize = (N+1) / 2; 
     int threadSize = totalThreadSize > THREADS_PER_BLOCK ? THREADS_PER_BLOCK : totalThreadSize;
     int gridSize = totalThreadSize / threadSize;
-    copy_and_upsweep<<<gridSize, threadSize>>>(input, result, rounded_length); // change totalThreadSize to N
+    copy_and_upsweep<<<gridSize, threadSize>>>(input, result, N); // change totalThreadSize to N
     cudaDeviceSynchronize();
 
     for (int two_d = 2; two_d <= rounded_length/2; two_d*=2) {

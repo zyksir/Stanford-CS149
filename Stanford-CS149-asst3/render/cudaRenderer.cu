@@ -452,23 +452,8 @@ __global__ void kernelRenderOneCircle(short imageWidth, short imageHeight, float
     shadePixel(circleIndex, pixelCenterNorm, p, imgPtr);
 }
 
-// check whether a circle has intersection with this box using a Rough Filter.
 __inline__ __device__ void
 checkCandidateCircles(float boxL, float boxR, float boxB, float boxT, 
-    size_t circleIdx, size_t tIdx, size_t numCircles, uint* output,
-    decltype(circleInBox) checkFunc) {
-    if (circleIdx >= numCircles) {
-        output[tIdx] = 0;
-    } else {
-        float3 p = *(float3*)(&cuConstRendererParams.position[circleIdx * 3]);
-        float rad = cuConstRendererParams.radius[circleIdx];
-
-        output[tIdx] = static_cast<uint> (checkFunc(p.x, p.y, rad, boxL, boxR, boxT, boxB));
-    }
-}
-
-__inline__ __device__ void
-checkCandidateCirclesOnce(float boxL, float boxR, float boxB, float boxT, 
     size_t circleIdx, size_t tIdx, size_t numCircles, uint* output) {
     if (circleIdx >= numCircles) {
         output[tIdx] = 0;
@@ -496,28 +481,6 @@ findCandidateCircles(size_t tIdx, size_t circleIdx, uint* inclusiveScanOutput, u
     }
 }
 
-// __inline__ __device__ void
-// checkConservativeCircles(float boxL, float boxR, float boxB, float boxT, 
-//     size_t circleIdx, size_t tIdx, size_t numCircles, uint* circleInBoxConservativeOutput) {
-//     if (circleIdx >= numCircles) {
-//         circleInBoxConservativeOutput[tIdx] = 0;
-//     } else {
-//         float3 p = *(float3*)(&cuConstRendererParams.position[circleIdx * 3]);
-//         float rad = cuConstRendererParams.radius[circleIdx];
-
-//         circleInBoxConservativeOutput[tIdx] = static_cast<uint> (circleInBoxConservative(p.x, p.y, rad, boxL, boxR, boxT, boxB));
-//     }
-// }
-
-// __inline__ __device__ void
-// checkCircleInBox(float boxL, float boxR, float boxB, float boxT, 
-//     size_t circleIdx, size_t tIdx, uint* circleInBoxOutput) {
-//     float3 p = *(float3*)(&cuConstRendererParams.position[circleIdx * 3]);
-//     float rad = cuConstRendererParams.radius[circleIdx];
-
-//     circleInBoxOutput[tIdx] = static_cast<uint> (circleInBox(p.x, p.y, rad, boxL, boxR, boxT, boxB));
-// }
-
 __global__ void kernelRenderCircles() {
     short imageWidth = cuConstRendererParams.imageWidth;
     short imageHeight = cuConstRendererParams.imageHeight;
@@ -538,12 +501,8 @@ __global__ void kernelRenderCircles() {
     float boxT = boxB + static_cast<float>(blockDim.y) / imageHeight;
 
     __shared__ uint circleInBoxOutput[BLOCKSIZE];
-    // __shared__ uint circleInBoxConservativeOutput[BLOCKSIZE];
     __shared__ uint inclusiveScanOutput[BLOCKSIZE];
-    // __shared__ uint candidateConservativeCircles[BLOCKSIZE];
-    // __shared__ uint candidateCircles[BLOCKSIZE];
     __shared__ uint scratch[BLOCKSIZE*2];
-    // uint numConservativeCircles;
     uint numCandidateCircles;
     size_t circleIdx;
     float4* imgPtr;
@@ -557,12 +516,11 @@ __global__ void kernelRenderCircles() {
                                       invHeight * (static_cast<float>(pixelY) + 0.5f));
     }
 
-
     // each time, we can check whether numCirclesPerIteration circles concurrently
     for(size_t circleIdxStart = 0; circleIdxStart < numCircles; circleIdxStart += numCirclesPerIteration) {
         circleIdx = tIdx + circleIdxStart;
 
-        checkCandidateCirclesOnce(boxL, boxR, boxB, boxT, circleIdx, tIdx, numCircles, circleInBoxOutput);
+        checkCandidateCircles(boxL, boxR, boxB, boxT, circleIdx, tIdx, numCircles, circleInBoxOutput);
         __syncthreads();
         sharedMemInclusiveScan(tIdx, circleInBoxOutput, inclusiveScanOutput, scratch, BLOCKSIZE);
         __syncthreads();
@@ -570,32 +528,6 @@ __global__ void kernelRenderCircles() {
         findCandidateCircles(tIdx, circleIdx, inclusiveScanOutput, candidateCircles, BLOCKSIZE);
         numCandidateCircles = inclusiveScanOutput[BLOCKSIZE - 1];
         __syncthreads();
-
-        // uint* circleInBoxConservativeOutput = circleInBoxOutput;
-        // checkCandidateCircles(boxL, boxR, boxB, boxT, circleIdx, tIdx, numCircles, circleInBoxConservativeOutput, circleInBoxConservative);
-        // // checkConservativeCircles(boxL, boxR, boxB, boxT, circleIdx, tIdx, numCircles, circleInBoxConservativeOutput);
-        // __syncthreads();
-        // sharedMemInclusiveScan(tIdx, circleInBoxConservativeOutput, inclusiveScanOutput, scratch, BLOCKSIZE);
-        // __syncthreads();
-        // findCandidateCircles(tIdx, circleIdx, inclusiveScanOutput, candidateConservativeCircles, BLOCKSIZE);
-        // numConservativeCircles = inclusiveScanOutput[BLOCKSIZE - 1];
-        // __syncthreads();
-
-        // if (tIdx >= numConservativeCircles) {
-        //     circleInBoxOutput[tIdx] = 0;
-        // } else {
-        //     circleIdx = candidateConservativeCircles[tIdx];
-        //     checkCandidateCircles(boxL, boxR, boxB, boxT, circleIdx, tIdx, numCircles, circleInBoxOutput, circleInBox);
-        //     // checkCircleInBox(boxL, boxR, boxB, boxT, candidateConservativeCircles[tIdx], tIdx, circleInBoxOutput);
-        // }
-        // __syncthreads();
-        // sharedMemInclusiveScan(tIdx, circleInBoxOutput, inclusiveScanOutput, scratch, BLOCKSIZE);
-        // __syncthreads();
-        // uint* candidateCircles = circleInBoxOutput;
-        // findCandidateCircles(tIdx, candidateConservativeCircles[tIdx], inclusiveScanOutput, candidateCircles, numConservativeCircles);
-        // numCandidateCircles = inclusiveScanOutput[numConservativeCircles - 1];
-        // __syncthreads();
-
         if (pixelX < imageWidth && pixelY < imageHeight) {
             for (size_t i=0; i < numCandidateCircles; i++) {
                 circleIdx = candidateCircles[i];

@@ -502,9 +502,9 @@ __global__ void kernelRenderCircles() {
 
     // Left, Right, Bottom, Top for the current block
     float boxL = static_cast<float>(blockIdx.x) / gridDim.x; 
-    float boxR = boxL + static_cast<float>(blockDim.x) / gridDim.x; 
+    float boxR = boxL + static_cast<float>(blockDim.x) / imageWidth; 
     float boxB = static_cast<float>(blockIdx.y) / gridDim.y; 
-    float boxT = boxB + static_cast<float>(blockDim.y) / gridDim.y;
+    float boxT = boxB + static_cast<float>(blockDim.y) / imageHeight;
 
     __shared__ uint circleInBoxOutput[BLOCKSIZE];
     // __shared__ uint circleInBoxConservativeOutput[BLOCKSIZE];
